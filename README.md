@@ -1,15 +1,17 @@
 # Tab IA
 
-MVP acadêmico para enviar áudio, processar em background com Redis e mostrar uma tablatura textual. Não usa banco de dados ou login. O arquivo de entrada fica temporariamente no diretório `uploads/` e é removido pelo worker ao terminar. Os estados/resultados expiram no Redis após uma hora.
+MVP acadêmico para enviar um áudio, processá-lo em segundo plano e exibir uma tablatura textual. Não usa banco de dados, login, Redis ou Docker. Os estados e resultados dos jobs ficam em um dicionário Python em RAM e desaparecem quando o processo da API é encerrado.
 
-## Arquitetura
+## Arquitetura local
 
 ```text
-Browser -> Next.js POST /api/jobs -> uploads/ + Redis list audio_jobs
-Browser -> Next.js GET /api/jobs/:id <- Redis job:<id>
-                                      ↑
-                              Python worker (BLPOP)
-                         Demucs -> Basic Pitch -> tab
+Browser -> Next.js POST /api/jobs -> FastAPI POST /jobs
+Browser -> Next.js GET /api/jobs/:id <- FastAPI GET /jobs/:id
+                                          |
+                                  BackgroundTasks
+                              Demucs -> Basic Pitch -> tab
+                                          |
+                                  jobs (dicionário RAM)
 ```
 
 Demucs não tem uma stem específica para guitarra. O MVP usa `--two-stems other` como aproximação (instrumental sem vocais), então outros instrumentos podem gerar notas espúrias. A conversão MIDI usa afinação padrão E A D G B e, para cada nota, seleciona a primeira corda/casa válida até a casa 22; não otimiza digitação nem ritmo. Basic Pitch pode ser sensível a áudio polifônico.
@@ -17,43 +19,45 @@ Demucs não tem uma stem específica para guitarra. O MVP usa `--two-stems other
 ## Pré-requisitos
 
 - Node.js 20 ou superior e npm.
-- Python 3.10–3.11 recomendado para compatibilidade das dependências de áudio.
+- Python 3.10 recomendado para compatibilidade das dependências de áudio. Use essa versão para criar o ambiente virtual; Python 3.14 não é compatível com o TensorFlow exigido pelo Basic Pitch.
 - FFmpeg instalado e disponível no `PATH` (necessário para decodificação e Demucs).
-- Docker Desktop (opcional, apenas para Redis).
+
+No Windows, você pode instalar o FFmpeg pelo WinGet: `winget install --id Gyan.FFmpeg.Shared --exact`. Depois, abra um terminal novo e confirme com `ffmpeg -version`.
 
 ## Rodar localmente
 
-1. Suba o Redis: `docker compose up -d redis`.
-2. Na raiz, copie `.env.example` para `.env.local` se precisar alterar `REDIS_URL` ou `UPLOAD_DIR`.
-3. Instale e inicie Next.js:
+1. Abra o terminal na raiz do projeto, na pasta que contém `package.json`. Copie `.env.example` para `.env.local` somente se quiser alterar o endereço da API Python. O padrão é `http://127.0.0.1:8000`.
+2. Em um terminal, instale e inicie o Next.js:
 
    ```bash
    npm install
    npm run dev
    ```
 
-4. Em outro terminal, crie o ambiente Python e instale o worker:
+3. Abra um segundo terminal também na raiz do projeto. No PowerShell, execute:
 
-   ```bash
-   cd worker
-   python -m venv .venv
-   # Windows PowerShell: .venv\Scripts\Activate.ps1
-   # macOS/Linux: source .venv/bin/activate
+   ```powershell
+   Set-Location .\worker
+   py -3.10 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python --version
    python -m pip install --upgrade pip
-   pip install -r requirements.txt
-   python worker.py
+   python -m pip install -r requirements.txt
+   python -m uvicorn api:app --host 127.0.0.1 --port 8000
    ```
 
-5. Abra http://localhost:3000, envie um MP3/WAV de até 50 MB. Mantenha Next.js, Redis e worker ativos.
+   Confirme que `python --version` mostra `Python 3.10.x`. Esses comandos criam o ambiente em `worker/.venv`; execute `Set-Location .\worker` apenas uma vez, partindo da raiz do projeto. No macOS/Linux, use `python3.10 -m venv .venv` e `source .venv/bin/activate` no lugar dos comandos de criação e ativação do PowerShell.
 
-Next.js e worker usam `REDIS_URL=redis://localhost:6379` por padrão. Se alterar a URL no Next, exporte a mesma variável também no shell do worker. A primeira execução do Demucs/Basic Pitch pode baixar modelos e levar alguns minutos. O upload salva no disco local compartilhado; essa configuração é para desenvolvimento em uma máquina, não para deploy com instâncias isoladas/serverless. Em produção, use armazenamento temporário compartilhado ou object storage e limites de tamanho/duração adequados.
+4. Abra http://localhost:3000 e envie um MP3/WAV de até 50 MB. Mantenha Next.js e FastAPI ativos enquanto o job é processado.
+
+A primeira execução pode baixar modelos do Demucs/Basic Pitch e levar alguns minutos. Para este MVP, rode apenas um processo Uvicorn: cada processo teria seu próprio dicionário de jobs, e requisições distribuídas entre processos não encontrariam necessariamente o job correspondente. Reiniciar a API apaga os jobs da memória. A API guarda o resultado por até uma hora após a conclusão.
 
 ## Estrutura
 
 ```text
-app/                         interface e rotas de API (Next.js App Router)
-  api/jobs/route.ts          upload, arquivo temporário e enqueue
-  api/jobs/[id]/route.ts     polling do estado/result
-worker/worker.py             consumer e pipeline de áudio
-docker-compose.yml           Redis local
+app/                         interface e rotas de proxy Next.js
+  api/jobs/route.ts          encaminha upload para FastAPI
+  api/jobs/[id]/route.ts     encaminha consulta de status para FastAPI
+worker/api.py                FastAPI, BackgroundTasks e pipeline de áudio
+worker/requirements.txt      dependências Python
 ```
