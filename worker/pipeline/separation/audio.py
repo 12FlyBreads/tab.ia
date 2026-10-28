@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import tempfile
 from pathlib import Path
 
 from fastapi.responses import Response, StreamingResponse
+from tempfiles import cleanup_preview, preview_path
 
 LOG = logging.getLogger("tab-ia-api")
 
 
 def create_preview(source: Path, job_id: str) -> Path:
     """Create a compact MP3 preview from the separated guitar stem."""
-    preview = Path(tempfile.gettempdir()) / f"tab-ia-{job_id}-guitar.mp3"
+    preview = preview_path(job_id)
     command = [
         "ffmpeg", "-y", "-v", "error", "-i", str(source), "-vn",
         "-codec:a", "libmp3lame", "-b:a", "160k", "-ar", "44100", "-ac", "2",
@@ -21,16 +21,41 @@ def create_preview(source: Path, job_id: str) -> Path:
     ]
     completed = subprocess.run(command, capture_output=True, text=True)
     if completed.returncode or not preview.is_file():
-        preview.unlink(missing_ok=True)
+        cleanup_preview(preview)
         details = (completed.stderr or completed.stdout).strip() or "FFmpeg não gerou a prévia de áudio."
         raise RuntimeError(f"Falha ao preparar prévia MP3: {details[-1200:]}")
     LOG.info("Prévia MP3 temporária criada: %s (%s bytes)", preview, preview.stat().st_size)
     return preview
 
 
+def prepare_source(
+    source: Path,
+    work_dir: Path,
+    start_seconds: float = 0.0,
+    end_seconds: float | None = None,
+) -> Path:
+    """Trim an uploaded track when the user selected a time interval."""
+    if start_seconds < 0 or (end_seconds is not None and end_seconds <= start_seconds):
+        raise ValueError("O intervalo selecionado para o áudio é inválido.")
+    if start_seconds == 0 and end_seconds is None:
+        return source
+
+    trimmed = work_dir / "selected-audio.wav"
+    command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-ss", str(start_seconds)]
+    if end_seconds is not None:
+        command.extend(["-t", str(end_seconds - start_seconds)])
+    command.extend(["-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(trimmed)])
+    completed = subprocess.run(command, capture_output=True, text=True)
+    if completed.returncode or not trimmed.is_file() or trimmed.stat().st_size <= 44:
+        trimmed.unlink(missing_ok=True)
+        details = (completed.stderr or completed.stdout).strip() or "FFmpeg não conseguiu recortar o intervalo selecionado."
+        raise RuntimeError(f"Falha ao recortar o áudio: {details[-1200:]}")
+    LOG.info("Intervalo %.2fs–%s aplicado ao upload", start_seconds, end_seconds or "fim")
+    return trimmed
+
+
 def remove_preview(path: str | Path | None) -> None:
-    if path:
-        Path(path).unlink(missing_ok=True)
+    cleanup_preview(path)
 
 
 def audio_response(path: Path, byte_range: str | None = None):

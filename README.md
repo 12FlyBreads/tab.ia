@@ -52,7 +52,9 @@ No Windows, você pode instalar o FFmpeg pelo WinGet: `winget install --id Gyan.
 
 4. Abra http://localhost:3000 e envie um MP3/WAV de até 50 MB. Mantenha Next.js e FastAPI ativos enquanto o job é processado.
 
-A primeira execução pode baixar modelos do Demucs/Basic Pitch e levar alguns minutos. Para este MVP, rode apenas um processo Uvicorn: cada processo teria seu próprio dicionário de jobs, e requisições distribuídas entre processos não encontrariam necessariamente o job correspondente. Reiniciar a API apaga os jobs da memória. O instrumental fica em arquivo temporário durante a sessão; ao recarregar a página, o job é descartado e esse arquivo removido. Jobs concluídos também expiram após uma hora como proteção adicional.
+Antes de gerar a tablatura, o player permite ouvir o upload completo. Arraste os dois marcadores da linha de seleção para delimitar um trecho e use “Ouvir trecho selecionado” para conferi-lo; ao enviar, somente esse intervalo será recortado e passado ao Demucs.
+
+A primeira execução pode baixar modelos do Demucs/Basic Pitch e levar alguns minutos. Para este MVP, rode apenas um processo Uvicorn: cada processo teria seu próprio dicionário de jobs, e requisições distribuídas entre processos não encontrariam necessariamente o job correspondente. Reiniciar a API apaga os jobs da memória e limpa a pasta `temp/`; ao iniciar, ela remove possíveis sobras de uma execução anterior. Uploads e saídas intermediárias do Demucs são apagados ao terminar cada job. A prévia MP3 fica em `temp/previews/` até o descarte/reload da página e também é apagada após uma hora como proteção adicional.
 
 ## Estrutura
 
@@ -62,8 +64,9 @@ app/                         interface e rotas de proxy Next.js
   api/jobs/[id]/route.ts     encaminha consulta de status para FastAPI
 worker/api.py                endpoints FastAPI e recebimento de uploads
 worker/jobs.py               estado em memória e expiração dos jobs
+worker/tempfiles.py          caminhos e limpeza dos arquivos temporários em temp/
 worker/pipeline/workflow.py  orquestração das etapas de processamento
-worker/pipeline/separation/  stem de guitarra, prévia MP3 e entrega com Range
+worker/pipeline/separation/  recorte do upload, stem de guitarra e prévia MP3
 worker/pipeline/inference/   inferência de áudio para MIDI com Basic Pitch
 worker/pipeline/tablature/   posicionamento de notas e renderização da tablatura
 worker/requirements.txt      dependências Python

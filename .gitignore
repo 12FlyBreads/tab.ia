@@ -15,6 +15,7 @@ next-env.d.ts.tmp
 !.env.*.example
 
 # Temporary uploads and generated audio/model artifacts
+/temp/
 uploads/
 *.mp3
 *.wav
