@@ -2,10 +2,15 @@
 
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import dynamic from 'next/dynamic';
 import { AudioPlayer } from './components/AudioPlayer';
 import { AudioUploader } from './components/AudioUploader';
-import { TabViewer } from './components/TabViewer';
 import { useAudioJob } from './hooks/useAudioJob';
+
+const TabViewer = dynamic(() => import('./components/TabViewer').then(module => module.TabViewer), {
+  ssr: false,
+  loading: () => <div className="flex min-h-[400px] w-full items-center justify-center rounded-xl bg-slate-900 text-slate-300">Carregando visualizador de tablatura…</div>,
+});
 
 export default function Home() {
   const { job, busy, message, submit } = useAudioJob();
@@ -39,7 +44,7 @@ export default function Home() {
           {job.status === 'failed' && <p className="mt-2 text-rose-300">{job.error || 'Erro inesperado no worker.'}</p>}
           {job.status === 'completed' && <AudioPlayer job={job} />}
         </section>}
-        {job?.tab && <div hidden={stage !== 2}><TabViewer tab={job.tab} /></div>}
+        {job?.tab && stage === 2 && <TabViewer tab={job.tab} alphaTex={job.alpha_tex || ''} />}
         {message && <p role="alert" className="mt-4 text-sm text-rose-300">{message}</p>}
       </div>
     </section>

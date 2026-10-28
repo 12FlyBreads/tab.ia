@@ -9,7 +9,7 @@ from time import time
 from core.config import SEPARATION_DIR
 from core.state import jobs, jobs_lock
 from pipeline.steps.separator import create_preview, prepare_source, remove_preview, separate_guitar
-from pipeline.steps.tab_builder import make_tab
+from pipeline.steps.tab_builder import make_alphatex, make_tab
 from pipeline.steps.transcriber import transcribe
 from utils.file_manager import cleanup_upload
 
@@ -36,10 +36,11 @@ def process_job(job_id: str, source_path: str, start_seconds: float = 0.0,
             LOG.info("Job %s: enviando a stem %s para Basic Pitch", job_id, guitar)
             notes, duration = transcribe(guitar)
             tab = make_tab(notes, duration)
+            alpha_tex = make_alphatex(notes, duration)
             preview = create_preview(guitar, job_id)
             with jobs_lock:
                 if job_id in jobs:
-                    jobs[job_id].update(status="completed", tab=tab,
+                    jobs[job_id].update(status="completed", tab=tab, alpha_tex=alpha_tex,
                                         instrumental_path=str(preview), updated_at=time())
                 else:
                     remove_preview(preview)
