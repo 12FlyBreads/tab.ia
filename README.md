@@ -66,8 +66,7 @@ worker/api/                  aplicação FastAPI e rotas HTTP de jobs
 worker/core/                 configuração e estado em memória dos jobs
 worker/utils/                diretórios temporários e wrappers FFmpeg
 worker/pipeline/orchestrator.py coordenação das etapas e atualização dos jobs
-worker/pipeline/separation/  preparação do áudio e entrega da prévia com suporte a Range
-worker/pipeline/steps/       recorte, separação Demucs, transcrição Basic Pitch e construção da tablatura
+worker/pipeline/steps/       recorte, separação Demucs, prévia instrumental, transcrição Basic Pitch e tablatura
 app/hooks/                   estado de jobs, polling e prévia local de áudio
 app/components/              upload, player instrumental e visualizador de tablatura
 worker/requirements.txt      dependências Python

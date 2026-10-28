@@ -8,8 +8,7 @@ from time import time
 
 from core.config import SEPARATION_DIR
 from core.state import jobs, jobs_lock
-from pipeline.separation.audio import create_preview, prepare_source, remove_preview
-from pipeline.steps.separator import separate_guitar
+from pipeline.steps.separator import create_preview, prepare_source, remove_preview, separate_guitar
 from pipeline.steps.tab_builder import make_tab
 from pipeline.steps.transcriber import transcribe
 from utils.file_manager import cleanup_upload

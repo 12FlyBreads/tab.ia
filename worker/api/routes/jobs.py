@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from core.config import MAX_UPLOAD_BYTES
 from core.state import jobs, jobs_lock, remove_expired_jobs
 from pipeline.orchestrator import process_job
-from pipeline.separation.audio import audio_response, remove_preview
+from pipeline.steps.separator import audio_response, remove_preview
 from utils.file_manager import cleanup_upload, upload_path
 
 router = APIRouter()
