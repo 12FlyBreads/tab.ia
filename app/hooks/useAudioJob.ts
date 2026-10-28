@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 
-export type Job = { id: string; status: 'queued' | 'processing' | 'completed' | 'failed'; tab?: string; error?: string };
+export type Job = { id: string; status: 'queued' | 'processing' | 'completed' | 'failed'; tab?: string; alpha_tex?: string; error?: string };
 
 export function useAudioJob() {
   const [job, setJob] = useState<Job | null>(null);
