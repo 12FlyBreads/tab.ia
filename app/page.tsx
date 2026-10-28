@@ -97,6 +97,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [playerStatus, setPlayerStatus] = useState('Pronto para reproduzir');
+  const [stage, setStage] = useState(0);
 
   useEffect(() => {
     setDuration(0);
@@ -154,6 +155,7 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Falha ao enviar áudio.');
       setJob(data);
+      setStage(1);
       setPlayerStatus('Pronto para reproduzir');
       window.sessionStorage.setItem('tab-ia-job-id', data.id);
     } catch (err) {
@@ -178,6 +180,11 @@ export default function Home() {
   }
 
   const waitingForDuration = Boolean(file && duration <= 0 && uploadAudioStatus !== 'Não foi possível carregar este áudio');
+  const maxStage = job?.tab ? 2 : job ? 1 : 0;
+
+  function moveStage(next: number) {
+    setStage(Math.max(0, Math.min(maxStage, next)));
+  }
 
   return <main className="min-h-screen px-5 py-12 sm:py-20">
     <section className="mx-auto max-w-3xl">
@@ -185,7 +192,17 @@ export default function Home() {
       <h1 className="mt-4 text-4xl font-bold sm:text-5xl">Transforme uma música em notas.</h1>
       <p className="mt-4 max-w-2xl leading-7 text-slate-300">Envie um arquivo de áudio. Um worker em segundo plano separa os instrumentos e tenta converter a guitarra em uma tablatura básica.</p>
 
-      <form onSubmit={submit} className="mt-10 rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
+      <div className="mt-10">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <button type="button" aria-label="Etapa anterior" onClick={() => moveStage(stage - 1)} disabled={stage === 0} className="rounded-full border border-slate-700 p-3 text-cyan-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-30">←</button>
+          <div className="text-center">
+            <p className="text-xs font-semibold uppercase tracking-[.2em] text-slate-400">Etapa {stage + 1} de 3</p>
+            <div className="mt-2 flex justify-center gap-2" aria-label={`Etapa ${stage + 1} de 3`}>{[0, 1, 2].map(index => <span key={index} className={`h-1.5 w-8 rounded-full ${index === stage ? 'bg-cyan-300' : 'bg-slate-700'}`} />)}</div>
+          </div>
+          <button type="button" aria-label="Próxima etapa" onClick={() => moveStage(stage + 1)} disabled={stage >= maxStage} className="rounded-full border border-slate-700 p-3 text-cyan-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-30">→</button>
+        </div>
+
+      <form onSubmit={submit} hidden={stage !== 0} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
         <label htmlFor="audio" className="block text-sm font-medium">Arquivo de áudio (.mp3 ou .wav)</label>
         <input id="audio" type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,.mp3,.wav" onChange={e => setFile(e.target.files?.[0] ?? null)} className="mt-3 block w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-cyan-300 file:px-4 file:py-2 file:font-semibold file:text-slate-950" />
         {previewUrl && <div className="mt-6 rounded-xl border border-slate-700 bg-slate-950 p-4 sm:p-5">
@@ -240,7 +257,7 @@ export default function Home() {
         {file && <p className="mt-3 text-sm text-slate-400">Selecionado: {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)</p>}
       </form>
 
-      {job && <section aria-live="polite" className="mt-6 rounded-2xl border border-slate-700 bg-slate-900 p-6">
+      {job && <section hidden={stage !== 1} aria-live="polite" className="rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
         <h2 className="text-lg font-semibold">{job.status === 'queued' ? 'Na fila' : job.status === 'processing' ? 'Processando áudio…' : job.status === 'completed' ? 'Tablatura pronta' : 'Não foi possível processar'}</h2>
         {(job.status === 'queued' || job.status === 'processing') && <p className="mt-2 text-slate-300">O worker está trabalhando. Esta página consulta o resultado automaticamente.</p>}
         {job.status === 'failed' && <p className="mt-2 text-rose-300">{job.error || 'Erro inesperado no worker.'}</p>}
@@ -266,9 +283,14 @@ export default function Home() {
           </a>
           <p className="mt-2 text-xs text-slate-400">A separação de guitarra é experimental e pode deixar outros sons residuais. O arquivo temporário é removido ao recarregar a página.</p>
         </div>}
-        {job.tab && <pre className="mt-5 overflow-x-auto rounded-xl bg-slate-950 p-5 font-mono text-sm leading-7 text-emerald-200">{job.tab}</pre>}
+      </section>}
+      {job?.tab && <section hidden={stage !== 2} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
+        <p className="text-sm font-semibold uppercase tracking-[.2em] text-cyan-300">Resultado final</p>
+        <h2 className="mt-2 text-xl font-semibold">Tablatura gerada</h2>
+        <pre className="mt-5 overflow-x-auto rounded-xl bg-slate-950 p-5 font-mono text-sm leading-7 text-emerald-200">{job.tab}</pre>
       </section>}
       {message && <p role="alert" className="mt-4 text-sm text-rose-300">{message}</p>}
+      </div>
     </section>
   </main>;
 }
