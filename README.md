@@ -62,12 +62,15 @@ A primeira execução pode baixar modelos do Demucs/Basic Pitch e levar alguns m
 app/                         interface e rotas de proxy Next.js
   api/jobs/route.ts          encaminha upload para FastAPI
   api/jobs/[id]/route.ts     encaminha consulta de status para FastAPI
-worker/api.py                endpoints FastAPI e recebimento de uploads
-worker/jobs.py               estado em memória e expiração dos jobs
-worker/tempfiles.py          caminhos e limpeza dos arquivos temporários em temp/
-worker/pipeline/workflow.py  orquestração das etapas de processamento
-worker/pipeline/separation/  recorte do upload, stem de guitarra e prévia MP3
+worker/api/                  aplicação FastAPI e rotas HTTP de jobs
+worker/core/                 configuração e estado em memória dos jobs
+worker/utils/                diretórios temporários e wrappers FFmpeg
+worker/pipeline/orchestrator.py coordenação das etapas e atualização dos jobs
+worker/pipeline/steps/       recorte, separação, transcrição e construção da tablatura
+worker/pipeline/separation/  implementação Demucs e entrega da prévia com suporte a Range
 worker/pipeline/inference/   inferência de áudio para MIDI com Basic Pitch
 worker/pipeline/tablature/   posicionamento de notas e renderização da tablatura
+app/hooks/                   estado de jobs, polling e prévia local de áudio
+app/components/              upload, player instrumental e visualizador de tablatura
 worker/requirements.txt      dependências Python
 ```
