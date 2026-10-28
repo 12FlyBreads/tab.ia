@@ -10,6 +10,10 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) return NextResponse.json({ error: 'Envie um arquivo de áudio.' }, { status: 400 });
     const body = new FormData();
     body.append('file', file, file.name);
+    const startSeconds = data.get('start_seconds');
+    const endSeconds = data.get('end_seconds');
+    if (typeof startSeconds === 'string') body.append('start_seconds', startSeconds);
+    if (typeof endSeconds === 'string') body.append('end_seconds', endSeconds);
     const baseUrl = process.env.PYTHON_API_URL || 'http://127.0.0.1:8000';
     const upstream = await fetch(`${baseUrl}/jobs`, { method: 'POST', body, cache: 'no-store' });
     const result = await upstream.json();
