@@ -18,4 +18,8 @@ def remove_expired_jobs() -> None:
             and now - job["updated_at"] > JOB_TTL_SECONDS
         ]
         for job_id in expired:
+            audio_path = jobs[job_id].get("instrumental_path")
+            if audio_path:
+                from pathlib import Path
+                Path(audio_path).unlink(missing_ok=True)
             del jobs[job_id]

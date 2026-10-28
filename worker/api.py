@@ -7,9 +7,11 @@ import uuid
 from pathlib import Path
 from time import time
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from jobs import jobs, jobs_lock, remove_expired_jobs
+from pipeline.separation.audio import audio_response, remove_preview
 from pipeline.workflow import process_job
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -51,4 +53,30 @@ def get_job(job_id: str):
         job = jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job inexistente ou expirado.")
-        return {key: value for key, value in job.items() if key not in {"created_at", "updated_at"}}
+        return {key: value for key, value in job.items() if key not in {"created_at", "updated_at", "instrumental_path"}}
+
+
+@app.get("/jobs/{job_id}/instrumental")
+def get_instrumental(job_id: str, range: str | None = Header(default=None, alias="Range")):
+    remove_expired_jobs()
+    with jobs_lock:
+        job = jobs.get(job_id)
+        audio_path = job.get("instrumental_path") if job else None
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job inexistente ou expirado.")
+        if job.get("status") != "completed" or not audio_path:
+            raise HTTPException(status_code=409, detail="Instrumental ainda não está disponível.")
+        path = Path(audio_path)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Áudio instrumental expirado.")
+
+    return audio_response(path, range)
+
+
+@app.delete("/jobs/{job_id}", status_code=204)
+def discard_job(job_id: str):
+    with jobs_lock:
+        job = jobs.pop(job_id, None)
+    if job is not None:
+        remove_preview(job.get("instrumental_path"))
+    return Response(status_code=204)

@@ -9,6 +9,14 @@ export default function Home() {
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [playerStatus, setPlayerStatus] = useState('Pronto para reproduzir');
+
+  useEffect(() => {
+    const previousJobId = window.sessionStorage.getItem('tab-ia-job-id');
+    if (!previousJobId) return;
+    window.sessionStorage.removeItem('tab-ia-job-id');
+    void fetch(`/api/jobs/${encodeURIComponent(previousJobId)}`, { method: 'DELETE', keepalive: true });
+  }, []);
 
   useEffect(() => {
     if (!job || job.status === 'completed' || job.status === 'failed') return;
@@ -28,6 +36,9 @@ export default function Home() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) return;
+    const previousJobId = window.sessionStorage.getItem('tab-ia-job-id');
+    if (previousJobId) void fetch(`/api/jobs/${encodeURIComponent(previousJobId)}`, { method: 'DELETE', keepalive: true });
+    window.sessionStorage.removeItem('tab-ia-job-id');
     setBusy(true); setJob(null); setMessage('');
     try {
       const body = new FormData(); body.append('file', file);
@@ -35,6 +46,8 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Falha ao enviar áudio.');
       setJob(data);
+      setPlayerStatus('Pronto para reproduzir');
+      window.sessionStorage.setItem('tab-ia-job-id', data.id);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Falha ao enviar áudio.');
     } finally { setBusy(false); }
@@ -57,6 +70,28 @@ export default function Home() {
         <h2 className="text-lg font-semibold">{job.status === 'queued' ? 'Na fila' : job.status === 'processing' ? 'Processando áudio…' : job.status === 'completed' ? 'Tablatura pronta' : 'Não foi possível processar'}</h2>
         {(job.status === 'queued' || job.status === 'processing') && <p className="mt-2 text-slate-300">O worker está trabalhando. Esta página consulta o resultado automaticamente.</p>}
         {job.status === 'failed' && <p className="mt-2 text-rose-300">{job.error || 'Erro inesperado no worker.'}</p>}
+        {job.status === 'completed' && <div className="mt-5 rounded-xl bg-slate-950 p-5">
+          <h3 className="font-semibold">Guitarra/violão isolado</h3>
+          <audio
+            className="mt-3 w-full accent-cyan-300"
+            controls
+            preload="auto"
+            src={`/api/jobs/${job.id}/instrumental`}
+            onLoadStart={() => setPlayerStatus('Preparando áudio…')}
+            onCanPlay={() => setPlayerStatus('Pronto para reproduzir')}
+            onWaiting={() => setPlayerStatus('Carregando trecho…')}
+            onPlaying={() => setPlayerStatus('Reproduzindo')}
+            onPause={() => setPlayerStatus('Pausado')}
+            onError={() => setPlayerStatus('Não foi possível carregar o áudio')}
+          >
+            Seu navegador não oferece suporte à reprodução de áudio.
+          </audio>
+          <p aria-live="polite" className="mt-2 text-xs text-slate-400">{playerStatus}</p>
+          <a className="mt-3 inline-flex rounded-lg border border-cyan-300 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-300/10" href={`/api/jobs/${job.id}/instrumental`} download="guitarra.mp3">
+            Baixar guitarra isolada
+          </a>
+          <p className="mt-2 text-xs text-slate-400">A separação de guitarra é experimental e pode deixar outros sons residuais. O arquivo temporário é removido ao recarregar a página.</p>
+        </div>}
         {job.tab && <pre className="mt-5 overflow-x-auto rounded-xl bg-slate-950 p-5 font-mono text-sm leading-7 text-emerald-200">{job.tab}</pre>}
       </section>}
       {message && <p role="alert" className="mt-4 text-sm text-rose-300">{message}</p>}
