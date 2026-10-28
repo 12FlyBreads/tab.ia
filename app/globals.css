@@ -5,3 +5,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: #0b1020; color: #f8fafc; font-family: Arial, Helvetica, sans-serif; }
 button, input { font: inherit; }
+
+/* alphaTab playback position: current bar, animated beat, and active notes. */
+.at-cursor-bar { background: rgba(34, 211, 238, 0.12); }
+.at-cursor-beat { width: 3px; background: rgba(34, 211, 238, 0.85); }
+.at-highlight * { fill: #22d3ee; stroke: #22d3ee; }
