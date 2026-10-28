@@ -1,4 +1,4 @@
-"""Guitar note positioning and text tablature rendering."""
+"""Guitar note positioning and text tablature rendering stage."""
 from __future__ import annotations
 
 STRINGS = [("E", 40), ("A", 45), ("D", 50), ("G", 55), ("B", 59), ("e", 64)]
@@ -6,7 +6,6 @@ MAX_FRET = 22
 
 
 def note_to_position(pitch: int) -> tuple[str, int] | None:
-    """Choose the first standard-tuned string/fret position for a MIDI pitch."""
     for name, open_pitch in STRINGS:
         fret = pitch - open_pitch
         if 0 <= fret <= MAX_FRET:
@@ -15,7 +14,6 @@ def note_to_position(pitch: int) -> tuple[str, int] | None:
 
 
 def make_tab(notes: list[tuple[float, int]], duration: float) -> str:
-    """Render a compact monospaced tab timeline, one column per detected note."""
     rows = {name: [] for name, _ in reversed(STRINGS)}
     placed_notes = 0
     for _note_time, pitch in notes:

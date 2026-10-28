@@ -1,4 +1,4 @@
-"""Basic Pitch audio-to-MIDI inference."""
+"""Basic Pitch audio-to-MIDI inference stage."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,46 +1,29 @@
-"""FastAPI entry point for the Tab IA worker."""
+"""Job creation, status, preview, and discard endpoints."""
 from __future__ import annotations
 
 import uuid
-from contextlib import asynccontextmanager
 from pathlib import Path
 from time import time
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from jobs import jobs, jobs_lock, remove_expired_jobs
-from pipeline.separation.audio import audio_response, remove_preview
-from pipeline.workflow import process_job
-from tempfiles import clear_temp_root, cleanup_upload, reset_temp_root, upload_path
+from core.config import MAX_UPLOAD_BYTES
+from core.state import jobs, jobs_lock, remove_expired_jobs
+from pipeline.orchestrator import process_job
+from pipeline.steps.separator import audio_response, remove_preview
+from utils.file_manager import cleanup_upload, upload_path
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    reset_temp_root()
-    try:
-        yield
-    finally:
-        clear_temp_root()
+router = APIRouter()
 
 
-app = FastAPI(title="Tab IA API", version="1.0.0", lifespan=lifespan)
-
-
-@app.post("/jobs", status_code=202)
-async def create_job(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    start_seconds: float = Form(0.0),
-    end_seconds: float | None = Form(None),
-):
+@router.post("/jobs", status_code=202)
+async def create_job(background_tasks: BackgroundTasks, file: UploadFile = File(...),
+                     start_seconds: float = Form(0.0), end_seconds: float | None = Form(None)):
     remove_expired_jobs()
     extension = Path(file.filename or "").suffix.lower()
     if extension not in {".mp3", ".wav"}:
         raise HTTPException(status_code=400, detail="Formato inválido. Use .mp3 ou .wav.")
-
     payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if not payload or len(payload) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail="O arquivo deve ter entre 1 byte e 50 MB.")
@@ -58,26 +41,25 @@ async def create_job(
         await file.close()
 
     with jobs_lock:
-        jobs[job_id] = {
-            "id": job_id, "status": "queued", "source_path": str(source),
-            "start_seconds": start_seconds, "end_seconds": end_seconds,
-            "created_at": time(), "updated_at": time(),
-        }
+        jobs[job_id] = {"id": job_id, "status": "queued", "source_path": str(source),
+                        "start_seconds": start_seconds, "end_seconds": end_seconds,
+                        "created_at": time(), "updated_at": time()}
     background_tasks.add_task(process_job, job_id, str(source), start_seconds, end_seconds)
     return {"id": job_id, "status": "queued"}
 
 
-@app.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}")
 def get_job(job_id: str):
     remove_expired_jobs()
     with jobs_lock:
         job = jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job inexistente ou expirado.")
-        return {key: value for key, value in job.items() if key not in {"created_at", "updated_at", "instrumental_path", "source_path"}}
+        return {key: value for key, value in job.items()
+                if key not in {"created_at", "updated_at", "instrumental_path", "source_path"}}
 
 
-@app.get("/jobs/{job_id}/instrumental")
+@router.get("/jobs/{job_id}/instrumental")
 def get_instrumental(job_id: str, range: str | None = Header(default=None, alias="Range")):
     remove_expired_jobs()
     with jobs_lock:
@@ -90,11 +72,10 @@ def get_instrumental(job_id: str, range: str | None = Header(default=None, alias
         path = Path(audio_path)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Áudio instrumental expirado.")
-
     return audio_response(path, range)
 
 
-@app.delete("/jobs/{job_id}", status_code=204)
+@router.delete("/jobs/{job_id}", status_code=204)
 def discard_job(job_id: str):
     with jobs_lock:
         job = jobs.pop(job_id, None)

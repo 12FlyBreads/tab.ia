@@ -1,4 +1,4 @@
-"""Orchestration of the audio processing stages for a job."""
+"""Run the audio processing stages and update the in-memory job state."""
 from __future__ import annotations
 
 import logging
@@ -6,22 +6,18 @@ import tempfile
 from pathlib import Path
 from time import time
 
-from jobs import jobs, jobs_lock
-from pipeline.inference.basic_pitch import transcribe
-from pipeline.separation.audio import create_preview, prepare_source, remove_preview
-from pipeline.separation.demucs import separate_guitar
-from pipeline.tablature.guitar import make_tab
-from tempfiles import SEPARATION_DIR, cleanup_upload
+from core.config import SEPARATION_DIR
+from core.state import jobs, jobs_lock
+from pipeline.steps.separator import create_preview, prepare_source, remove_preview, separate_guitar
+from pipeline.steps.tab_builder import make_tab
+from pipeline.steps.transcriber import transcribe
+from utils.file_manager import cleanup_upload
 
 LOG = logging.getLogger("tab-ia-api")
 
 
-def process_job(
-    job_id: str,
-    source_path: str,
-    start_seconds: float = 0.0,
-    end_seconds: float | None = None,
-) -> None:
+def process_job(job_id: str, source_path: str, start_seconds: float = 0.0,
+                end_seconds: float | None = None) -> None:
     source = Path(source_path)
     preview: Path | None = None
     with jobs_lock:
@@ -43,10 +39,8 @@ def process_job(
             preview = create_preview(guitar, job_id)
             with jobs_lock:
                 if job_id in jobs:
-                    jobs[job_id].update(
-                        status="completed", tab=tab,
-                        instrumental_path=str(preview), updated_at=time(),
-                    )
+                    jobs[job_id].update(status="completed", tab=tab,
+                                        instrumental_path=str(preview), updated_at=time())
                 else:
                     remove_preview(preview)
                     preview = None

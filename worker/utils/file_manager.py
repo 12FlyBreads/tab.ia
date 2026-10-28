@@ -1,25 +1,19 @@
-"""Repository-local temporary storage for worker audio artifacts."""
+"""Create, locate, and clean up temporary job artifacts."""
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
 
-TEMP_ROOT = Path(__file__).resolve().parent.parent / "temp"
-UPLOADS_DIR = TEMP_ROOT / "uploads"
-SEPARATION_DIR = TEMP_ROOT / "separation"
-PREVIEWS_DIR = TEMP_ROOT / "previews"
+from core.config import PREVIEWS_DIR, SEPARATION_DIR, TEMP_ROOT, UPLOADS_DIR
 
 
 def reset_temp_root() -> None:
-    """Remove leftovers from previous runs and create the working folders."""
     shutil.rmtree(TEMP_ROOT, ignore_errors=True)
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    SEPARATION_DIR.mkdir(parents=True, exist_ok=True)
-    PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+    for directory in (UPLOADS_DIR, SEPARATION_DIR, PREVIEWS_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 def clear_temp_root() -> None:
-    """Clear all temporary artifacts while leaving an empty /temp directory."""
     shutil.rmtree(TEMP_ROOT, ignore_errors=True)
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 

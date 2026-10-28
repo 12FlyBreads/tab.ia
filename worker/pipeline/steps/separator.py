@@ -1,12 +1,14 @@
-"""Temporary preview audio creation and byte-range delivery."""
+"""Audio preparation, guitar separation, and instrumental preview helpers."""
 from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi.responses import Response, StreamingResponse
-from tempfiles import cleanup_preview, preview_path
+from utils.file_manager import cleanup_preview, preview_path
+from utils.ffmpeg import convert_to_mp3
 
 LOG = logging.getLogger("tab-ia-api")
 
@@ -14,16 +16,11 @@ LOG = logging.getLogger("tab-ia-api")
 def create_preview(source: Path, job_id: str) -> Path:
     """Create a compact MP3 preview from the separated guitar stem."""
     preview = preview_path(job_id)
-    command = [
-        "ffmpeg", "-y", "-v", "error", "-i", str(source), "-vn",
-        "-codec:a", "libmp3lame", "-b:a", "160k", "-ar", "44100", "-ac", "2",
-        str(preview),
-    ]
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode or not preview.is_file():
+    try:
+        convert_to_mp3(source, preview)
+    except RuntimeError:
         cleanup_preview(preview)
-        details = (completed.stderr or completed.stdout).strip() or "FFmpeg não gerou a prévia de áudio."
-        raise RuntimeError(f"Falha ao preparar prévia MP3: {details[-1200:]}")
+        raise
     LOG.info("Prévia MP3 temporária criada: %s (%s bytes)", preview, preview.stat().st_size)
     return preview
 
@@ -35,23 +32,8 @@ def prepare_source(
     end_seconds: float | None = None,
 ) -> Path:
     """Trim an uploaded track when the user selected a time interval."""
-    if start_seconds < 0 or (end_seconds is not None and end_seconds <= start_seconds):
-        raise ValueError("O intervalo selecionado para o áudio é inválido.")
-    if start_seconds == 0 and end_seconds is None:
-        return source
-
-    trimmed = work_dir / "selected-audio.wav"
-    command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-ss", str(start_seconds)]
-    if end_seconds is not None:
-        command.extend(["-t", str(end_seconds - start_seconds)])
-    command.extend(["-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(trimmed)])
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode or not trimmed.is_file() or trimmed.stat().st_size <= 44:
-        trimmed.unlink(missing_ok=True)
-        details = (completed.stderr or completed.stdout).strip() or "FFmpeg não conseguiu recortar o intervalo selecionado."
-        raise RuntimeError(f"Falha ao recortar o áudio: {details[-1200:]}")
-    LOG.info("Intervalo %.2fs–%s aplicado ao upload", start_seconds, end_seconds or "fim")
-    return trimmed
+    from pipeline.steps.trimmer import trim_selected_audio
+    return trim_selected_audio(source, work_dir, start_seconds, end_seconds)
 
 
 def remove_preview(path: str | Path | None) -> None:
@@ -104,3 +86,20 @@ def audio_response(path: Path, byte_range: str | None = None):
 
     headers["Content-Length"] = str(size)
     return StreamingResponse(path.open("rb"), media_type="audio/mpeg", headers=headers)
+
+
+def separate_guitar(source: Path, output_dir: Path) -> Path:
+    """Extract the guitar stem with Demucs' experimental six-source model."""
+    command = [sys.executable, "-m", "demucs", "--two-stems", "guitar",
+               "-n", "htdemucs_6s", "-o", str(output_dir), str(source)]
+    completed = subprocess.run(command, capture_output=True, text=True)
+    if completed.returncode:
+        details = (completed.stderr or completed.stdout).strip()
+        if not details:
+            details = "O Demucs terminou sem informar detalhes."
+        raise RuntimeError(f"Demucs falhou (código {completed.returncode}): {details[-2000:]}")
+    stem = output_dir / "htdemucs_6s" / source.stem / "guitar.wav"
+    if not stem.is_file():
+        raise RuntimeError("O Demucs terminou sem criar a faixa guitar.wav.")
+    LOG.info("Demucs selecionou a stem de guitarra: %s", stem)
+    return stem
