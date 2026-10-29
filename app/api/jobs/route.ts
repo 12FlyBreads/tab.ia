@@ -7,9 +7,13 @@ export async function POST(request: Request) {
   try {
     const data = await request.formData();
     const file = data.get('file');
-    if (!(file instanceof File)) return NextResponse.json({ error: 'Envie um arquivo de áudio.' }, { status: 400 });
     const body = new FormData();
-    body.append('file', file, file.name);
+    if (file instanceof File) body.append('file', file, file.name);
+    const youtubeSource = data.get('youtube_source');
+    if (typeof youtubeSource === 'string' && youtubeSource.trim()) body.append('youtube_source', youtubeSource.trim());
+    const youtubePreviewId = data.get('youtube_preview_id');
+    if (typeof youtubePreviewId === 'string' && youtubePreviewId) body.append('youtube_preview_id', youtubePreviewId);
+    if (!(file instanceof File) && typeof youtubeSource !== 'string' && typeof youtubePreviewId !== 'string') return NextResponse.json({ error: 'Envie um arquivo ou informe o YouTube.' }, { status: 400 });
     const startSeconds = data.get('start_seconds');
     const endSeconds = data.get('end_seconds');
     if (typeof startSeconds === 'string') body.append('start_seconds', startSeconds);

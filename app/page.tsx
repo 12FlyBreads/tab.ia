@@ -39,8 +39,8 @@ export default function Home() {
   }, [job?.status, job?.tab, stage]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>, file: File | null,
-    duration: number, start: number, end: number) {
-    const created = await submit(event, file, duration, start, end, settings);
+    youtubePreviewId: string, duration: number, start: number, end: number) {
+    const created = await submit(event, file, youtubePreviewId, duration, start, end, settings);
     if (created) setStage(1);
     return created;
   }

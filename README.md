@@ -71,3 +71,7 @@ app/hooks/                   estado de jobs, polling e prévia local de áudio
 app/components/              upload, player instrumental e visualizador de tablatura
 worker/requirements.txt      dependências Python
 ```
+
+## Entrada pelo YouTube
+
+Na tela de envio, escolha **YouTube** para colar um link ou pesquisar pelo nome do vídeo. Na busca, o primeiro resultado é usado. O worker baixa o áudio com `yt-dlp`, converte para MP3 usando FFmpeg e então executa as mesmas etapas de separação, transcrição e geração de tablatura. O download limita vídeos a menos de 20 minutos e 50 MB; a busca e os links do YouTube exigem conexão com a internet no ambiente do worker. Instale a nova dependência ao atualizar o ambiente: `python -m pip install -r requirements.txt`.

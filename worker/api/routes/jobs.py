@@ -4,11 +4,12 @@ from __future__ import annotations
 import uuid
 import json
 import math
+import shutil
 from pathlib import Path
 from time import time
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 
 from core.config import (
     BASIC_PITCH_FRAME_THRESHOLD,
@@ -25,8 +26,47 @@ from core.state import jobs, jobs_lock, remove_expired_jobs
 from pipeline.orchestrator import process_job
 from pipeline.steps.separator import audio_response, remove_preview
 from utils.file_manager import cleanup_upload, upload_path
+from utils.youtube import (
+    create_youtube_preview, discard_youtube_preview,
+    get_youtube_preview, process_youtube_job, search_youtube,
+)
 
 router = APIRouter()
+
+
+@router.post("/youtube/previews")
+def create_youtube_audio_preview(youtube_source: str = Form(...)):
+    if not youtube_source.strip() or len(youtube_source) > 500:
+        raise HTTPException(status_code=400, detail="Informe um link válido do YouTube.")
+    try:
+        preview_id = create_youtube_preview(youtube_source.strip())
+        return {"id": preview_id, "audio_url": f"/youtube/previews/{preview_id}"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[-1000:]) from exc
+
+
+@router.get("/youtube/previews/{preview_id}")
+def get_youtube_audio_preview(preview_id: str):
+    path = get_youtube_preview(preview_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Prévia inexistente ou expirada.")
+    return FileResponse(path, media_type="audio/mpeg")
+
+
+@router.delete("/youtube/previews/{preview_id}", status_code=204)
+def delete_youtube_audio_preview(preview_id: str):
+    discard_youtube_preview(preview_id)
+    return Response(status_code=204)
+
+
+@router.get("/youtube/search")
+def youtube_search(q: str):
+    try:
+        return {"results": search_youtube(q)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Não foi possível pesquisar no YouTube agora.") from exc
 
 
 def parse_basic_pitch_settings(raw_settings: str | None) -> dict:
@@ -76,36 +116,56 @@ def parse_basic_pitch_settings(raw_settings: str | None) -> dict:
 
 
 @router.post("/jobs", status_code=202)
-async def create_job(background_tasks: BackgroundTasks, file: UploadFile = File(...),
+async def create_job(background_tasks: BackgroundTasks, file: UploadFile | None = File(None),
+                     youtube_source: str | None = Form(None),
+                     youtube_preview_id: str | None = Form(None),
                      start_seconds: float = Form(0.0), end_seconds: float | None = Form(None),
                      basic_pitch_settings: str | None = Form(None)):
     remove_expired_jobs()
     transcription_settings = parse_basic_pitch_settings(basic_pitch_settings)
-    extension = Path(file.filename or "").suffix.lower()
-    if extension not in {".mp3", ".wav"}:
-        raise HTTPException(status_code=400, detail="Formato inválido. Use .mp3 ou .wav.")
-    payload = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not payload or len(payload) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="O arquivo deve ter entre 1 byte e 50 MB.")
+    if sum(bool(value) for value in (file, youtube_source, youtube_preview_id)) != 1:
+        raise HTTPException(status_code=400, detail="Envie um arquivo, link ou prévia selecionada do YouTube.")
+    payload = None
+    extension = ".mp3"
+    if file:
+        extension = Path(file.filename or "").suffix.lower()
+        if extension not in {".mp3", ".wav"}:
+            raise HTTPException(status_code=400, detail="Formato inválido. Use .mp3 ou .wav.")
+        payload = await file.read(MAX_UPLOAD_BYTES + 1)
+        if not payload or len(payload) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="O arquivo deve ter entre 1 byte e 50 MB.")
     if start_seconds < 0 or (end_seconds is not None and end_seconds <= start_seconds):
         raise HTTPException(status_code=400, detail="O intervalo selecionado para o áudio é inválido.")
 
+    if youtube_source and len(youtube_source.strip()) > 500:
+        raise HTTPException(status_code=400, detail="Informe um link ou termo de busca válido.")
     job_id = str(uuid.uuid4())
-    source = upload_path(job_id, extension)
+    youtube_preview_path = get_youtube_preview(youtube_preview_id) if youtube_preview_id else None
+    if youtube_preview_id and not youtube_preview_path:
+        raise HTTPException(status_code=404, detail="A prévia do YouTube expirou. Selecione o vídeo novamente.")
+    source = upload_path(job_id, extension) if file else upload_path(job_id, ".mp3") if youtube_preview_id else None
     try:
-        source.write_bytes(payload)
+        if file and source and payload:
+            source.write_bytes(payload)
+        elif source and youtube_preview_path:
+            shutil.copyfile(youtube_preview_path, source)
     except Exception:
         cleanup_upload(source)
         raise
     finally:
-        await file.close()
+        if file:
+            await file.close()
 
     with jobs_lock:
-        jobs[job_id] = {"id": job_id, "status": "queued", "source_path": str(source),
+        jobs[job_id] = {"id": job_id, "status": "queued", "source_path": str(source) if source else None,
+                        "youtube_source": youtube_source.strip() if youtube_source else None,
                         "start_seconds": start_seconds, "end_seconds": end_seconds,
                         "basic_pitch_settings": transcription_settings,
                         "created_at": time(), "updated_at": time()}
-    background_tasks.add_task(process_job, job_id, str(source), start_seconds, end_seconds, transcription_settings)
+    if youtube_source:
+        background_tasks.add_task(process_youtube_job, job_id, youtube_source.strip(), start_seconds, end_seconds, transcription_settings)
+    else:
+        background_tasks.add_task(process_job, job_id, str(source), start_seconds, end_seconds, transcription_settings)
     return {"id": job_id, "status": "queued"}
 
 

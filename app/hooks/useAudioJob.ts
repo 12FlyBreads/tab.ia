@@ -33,14 +33,16 @@ export function useAudioJob() {
     return () => window.clearInterval(timer);
   }, [job]);
 
-  const submit = useCallback(async (event: FormEvent<HTMLFormElement>, file: File | null,
+  const submit = useCallback(async (event: FormEvent<HTMLFormElement>, file: File | null, youtubePreviewId: string,
     duration: number, trimStart: number, trimEnd: number, settings: BasicPitchSettings) => {
     event.preventDefault();
-    if (!file) return false;
+    if (!file && !youtubePreviewId) return false;
     discardStoredJob();
     setBusy(true); setJob(null); setMessage('');
     try {
-      const body = new FormData(); body.append('file', file);
+      const body = new FormData();
+      if (file) body.append('file', file);
+      if (youtubePreviewId) body.append('youtube_preview_id', youtubePreviewId);
       body.append('basic_pitch_settings', JSON.stringify(settings));
       const wholeTrackSelected = duration > 0 && trimStart <= 0.05 && trimEnd >= duration - 0.05;
       if (duration > 0 && !wholeTrackSelected) {
