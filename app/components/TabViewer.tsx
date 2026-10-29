@@ -1,6 +1,7 @@
 'use client';
 
 import { PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
+import { useAudioWaveform } from '../hooks/useAudioWaveform';
 
 type AlphaTabEvent<T = void> = { on: (callback: (event: T) => void) => () => void };
 type BeatData = { playbackStart: number; playbackDuration: number };
@@ -64,14 +65,10 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-const WAVEFORM_BARS = Array.from({ length: 88 }, (_, index) => {
-  const shape = Math.abs(Math.sin(index * 0.47) * 0.58 + Math.sin(index * 0.19 + 1.4) * 0.3 + Math.cos(index * 0.83) * 0.12);
-  return Math.round(18 + shape * 82);
-});
-
 export function TabViewer({ alphaTex, fileUrl, fileData, instrumentalUrl, tab }: TabViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instrumentalAudioRef = useRef<HTMLAudioElement>(null);
+  const waveform = useAudioWaveform(instrumentalUrl || '');
   const apiRef = useRef<AlphaTabApi | null>(null);
   const lastPlaybackTickRef = useRef(0);
   const lastPlaybackTimeRef = useRef(0);
@@ -424,7 +421,7 @@ export function TabViewer({ alphaTex, fileUrl, fileData, instrumentalUrl, tab }:
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-lg font-bold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-40">{guitarPlaying ? 'Ⅱ' : '▶'}</button>
         <span className="w-24 shrink-0 text-center font-mono text-xs tabular-nums text-slate-300">{formatTime(guitarCurrentTime * 1000)} / {formatTime(guitarDuration * 1000)}</span>
         <div className="relative flex h-8 min-w-40 flex-1 touch-none items-center justify-between gap-[2px]" aria-label="Linha do tempo da guitarra isolada">
-          {WAVEFORM_BARS.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${guitarDuration > 0 && index / WAVEFORM_BARS.length <= guitarCurrentTime / guitarDuration ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
+          {waveform.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${guitarDuration > 0 && index / waveform.length <= guitarCurrentTime / guitarDuration ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
           <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[1] h-7 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow" style={{ left: `${guitarDuration > 0 ? (guitarCurrentTime / guitarDuration) * 100 : 0}%` }} />
           <input aria-label="Posição da guitarra isolada" type="range" min={0} max={Math.max(1, guitarDuration)} step={0.01}
             value={Math.min(guitarCurrentTime, Math.max(1, guitarDuration))} onChange={event => seekInstrumental(Number(event.target.value))}
@@ -443,7 +440,7 @@ export function TabViewer({ alphaTex, fileUrl, fileData, instrumentalUrl, tab }:
         </span>
 
         <div className="relative flex h-8 min-w-40 flex-1 touch-none items-center justify-between gap-[2px]" aria-label="Linha do tempo da tablatura">
-          {WAVEFORM_BARS.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${index / WAVEFORM_BARS.length <= playbackProgress ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
+          {waveform.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${index / waveform.length <= playbackProgress ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
           <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[1] h-7 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow" style={{ left: `${playbackProgress * 100}%` }} />
           <input aria-label="Posição da música" type="range" min={0} max={Math.max(1, endTick)} step={1}
             value={Math.min(currentTick, Math.max(1, endTick))} onChange={event => seekToTick(Number(event.target.value))}
