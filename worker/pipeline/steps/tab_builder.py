@@ -32,13 +32,15 @@ def make_tab(notes: list[tuple[float, int]], duration: float) -> str:
     return "\n".join(lines)
 
 
-def make_alphatex(notes: list[tuple[float, int]], duration: float) -> str:
+def make_alphatex(notes: list[tuple[float, int]], duration: float, tempo: float = 120) -> str:
     """Convert detected guitar notes to alphaTex for alphaTab rendering/playback.
 
     Basic Pitch's MIDI objects are in-memory only. alphaTab imports score formats,
     so expose a score representation instead of trying to load a MIDI file.
-    Onsets are quantized to sixteenths at 120 BPM (125 ms per step).
+    Onsets are quantized to sixteenths using the configured Basic Pitch tempo.
     """
+    tempo = max(1, tempo)
+    step_duration = 60 / tempo / 4
     events: dict[int, list[str]] = {}
     for onset, pitch in notes:
         position = note_to_position(pitch)
@@ -47,13 +49,13 @@ def make_alphatex(notes: list[tuple[float, int]], duration: float) -> str:
         string_name, fret = position
         string_number = next(index for index, (name, _) in enumerate(reversed(STRINGS), 1)
                              if name == string_name)
-        step = max(0, round(onset / 0.125))
+        step = max(0, round(onset / step_duration))
         events.setdefault(step, []).append(f"{fret}.{string_number}")
 
     if not events:
         return ""
 
-    last_step = max(max(events), round(max(0.0, duration) / 0.125) - 1)
+    last_step = max(max(events), round(max(0.0, duration) / step_duration) - 1)
     beats: list[str] = []
     for step in range(last_step + 1):
         notes_at_step = events.get(step)
@@ -67,4 +69,4 @@ def make_alphatex(notes: list[tuple[float, int]], duration: float) -> str:
             for index in range(0, len(beats), 16)]
     # alphaTex infers the guitar staff from fretted notes (fret.string). The
     # default guitar tuning is used, matching note_to_position above.
-    return "\\title 'Tab IA' \\tempo 120 :16 " + " ".join(bars)
+    return f"\\title 'Tab IA' \\tempo {tempo:g} :16 " + " ".join(bars)

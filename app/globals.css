@@ -6,6 +6,27 @@
 body { margin: 0; background: #0b1020; color: #f8fafc; font-family: Arial, Helvetica, sans-serif; }
 button, input { font: inherit; }
 
+.settings-panel-scroll {
+  scrollbar-color: #475569 transparent;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+.settings-panel-scroll::-webkit-scrollbar { width: 8px; }
+.settings-panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.settings-panel-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #475569;
+  background-clip: padding-box;
+}
+.settings-panel-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; background-clip: padding-box; }
+
+.stage-arrow-left { left: max(0.5rem, calc((100vw - 48rem) / 2 - 4rem)); top: 50%; }
+.stage-arrow-right { right: max(0.5rem, calc((100vw - 48rem) / 2 - 4rem)); top: 50%; }
+.tab-scroll-viewport { scrollbar-width: none; }
+.tab-scroll-viewport::-webkit-scrollbar { display: none; }
+
 /* alphaTab playback position: current bar, animated beat, and active notes. */
 .at-cursor-bar { background: rgba(34, 211, 238, 0.12); }
 .at-cursor-beat { width: 3px; background: rgba(34, 211, 238, 0.85); }

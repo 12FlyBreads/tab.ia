@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import type { BasicPitchSettings } from '../utils/basicPitchSettings';
 
 export type Job = { id: string; status: 'queued' | 'processing' | 'completed' | 'failed'; tab?: string; alpha_tex?: string; error?: string };
 
@@ -33,13 +34,14 @@ export function useAudioJob() {
   }, [job]);
 
   const submit = useCallback(async (event: FormEvent<HTMLFormElement>, file: File | null,
-    duration: number, trimStart: number, trimEnd: number) => {
+    duration: number, trimStart: number, trimEnd: number, settings: BasicPitchSettings) => {
     event.preventDefault();
     if (!file) return false;
     discardStoredJob();
     setBusy(true); setJob(null); setMessage('');
     try {
       const body = new FormData(); body.append('file', file);
+      body.append('basic_pitch_settings', JSON.stringify(settings));
       const wholeTrackSelected = duration > 0 && trimStart <= 0.05 && trimEnd >= duration - 0.05;
       if (duration > 0 && !wholeTrackSelected) {
         body.append('start_seconds', trimStart.toFixed(2));

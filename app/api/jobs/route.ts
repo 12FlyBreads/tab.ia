@@ -14,6 +14,8 @@ export async function POST(request: Request) {
     const endSeconds = data.get('end_seconds');
     if (typeof startSeconds === 'string') body.append('start_seconds', startSeconds);
     if (typeof endSeconds === 'string') body.append('end_seconds', endSeconds);
+    const basicPitchSettings = data.get('basic_pitch_settings');
+    if (typeof basicPitchSettings === 'string') body.append('basic_pitch_settings', basicPitchSettings);
     const baseUrl = process.env.PYTHON_API_URL || 'http://127.0.0.1:8000';
     const upstream = await fetch(`${baseUrl}/jobs`, { method: 'POST', body, cache: 'no-store' });
     const result = await upstream.json();
