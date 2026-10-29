@@ -1,10 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 
 type AlphaTabEvent<T = void> = { on: (callback: (event: T) => void) => () => void };
 type BeatData = { playbackStart: number; playbackDuration: number };
-type ScoreBar = { displayWidth: number; voices: Array<{ beats: BeatData[] }> };
+type ScoreBar = {
+  displayWidth: number;
+  masterBar: { start: number; calculateDuration: () => number };
+  voices: Array<{ beats: BeatData[] }>;
+};
 type ScoreStaff = {
   showStandardNotation: boolean;
   showTablature: boolean;
@@ -20,11 +24,15 @@ type PlayerPosition = {
   currentTick: number;
   endTick: number;
 };
+type BeatLookupResult = { currentBeat: unknown };
+type MasterBarBounds = { lineAlignedBounds: { x: number } };
 type AlphaTabApi = {
   destroy: () => void;
   load: (data: string | Uint8Array) => boolean;
   tex: (value: string) => void;
   playPause: () => void;
+  tickCache: { findBeat: (tracks: Set<number>, tick: number) => BeatLookupResult | null } | null;
+  boundsLookup: { findMasterBarByIndex: (index: number) => MasterBarBounds | null } | null;
   isReadyForPlayback: boolean;
   playbackSpeed: number;
   masterVolume: number;
@@ -47,6 +55,7 @@ type TabViewerProps = {
   alphaTex?: string;
   fileUrl?: string;
   fileData?: Uint8Array;
+  instrumentalUrl?: string;
   tab?: string;
 };
 
@@ -55,26 +64,70 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) {
+const WAVEFORM_BARS = Array.from({ length: 88 }, (_, index) => {
+  const shape = Math.abs(Math.sin(index * 0.47) * 0.58 + Math.sin(index * 0.19 + 1.4) * 0.3 + Math.cos(index * 0.83) * 0.12);
+  return Math.round(18 + shape * 82);
+});
+
+export function TabViewer({ alphaTex, fileUrl, fileData, instrumentalUrl, tab }: TabViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const instrumentalAudioRef = useRef<HTMLAudioElement>(null);
   const apiRef = useRef<AlphaTabApi | null>(null);
+  const lastPlaybackTickRef = useRef(0);
+  const lastPlaybackTimeRef = useRef(0);
+  const measureRef = useRef(0);
+  const scoreDragRef = useRef<{ pointerId: number; startX: number; startScrollLeft: number; moved: boolean } | null>(null);
+  const suppressScoreClickRef = useRef(false);
   const [rendered, setRendered] = useState(false);
   const [soundFontLoaded, setSoundFontLoaded] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [audioSource, setAudioSource] = useState<'synth' | 'guitar'>('synth');
   const [status, setStatus] = useState('Carregando tablatura…');
+  const [guitarPlaying, setGuitarPlaying] = useState(false);
+  const [guitarCurrentTime, setGuitarCurrentTime] = useState(0);
+  const [guitarDuration, setGuitarDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
   const [currentTick, setCurrentTick] = useState(0);
   const [endTick, setEndTick] = useState(0);
-  const [looping, setLooping] = useState(false);
   const [metronome, setMetronome] = useState(false);
-  const [bpm, setBpm] = useState(120);
+  const [speed, setSpeed] = useState(1);
   const [volume, setVolume] = useState(80);
   const [measure, setMeasure] = useState(0);
   const [measureCount, setMeasureCount] = useState(0);
   const volumeRef = useRef(80);
-  const baseTempoRef = useRef(120);
+
+  function keepPlaybackCursorInView(force = false) {
+    const viewport = containerRef.current?.parentElement;
+    if (!viewport || viewport.clientWidth === 0) return;
+
+    // Use alphaTab's rendered cursor as the source of truth. BoundsLookup coordinates
+    // can lag behind a seek/loop and leave the scroll position on the old measure.
+    const cursor = containerRef.current?.querySelector('.at-cursor-beat');
+    if (!cursor) return;
+    const cursorX = cursor.getBoundingClientRect().left - viewport.getBoundingClientRect().left + viewport.scrollLeft;
+
+    const targetScrollLeft = Math.max(0, cursorX - viewport.clientWidth / 3);
+    const cursorViewportX = cursorX - viewport.scrollLeft;
+    if (force || cursorViewportX > viewport.clientWidth / 3) {
+      viewport.scrollLeft = Math.min(targetScrollLeft, viewport.scrollWidth - viewport.clientWidth);
+    }
+  }
+
+  function togglePlayback() {
+    const api = apiRef.current;
+    if (!api) return;
+    api.playPause();
+    if (!playing && measureRef.current === 0) keepPlaybackCursorInView(true);
+  }
+
+  function selectAudioSource(source: 'synth' | 'guitar') {
+    if (source === audioSource) return;
+    if (playing) apiRef.current?.playPause();
+    instrumentalAudioRef.current?.pause();
+    setAudioSource(source);
+  }
 
   useEffect(() => {
     let active = true;
@@ -85,14 +138,19 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
     setSoundFontLoaded(false);
     setPlayerReady(false);
     setPlaying(false);
+    setGuitarPlaying(false);
+    setGuitarCurrentTime(0);
+    setGuitarDuration(0);
     setCurrentTime(0);
     setEndTime(0);
     setCurrentTick(0);
     setEndTick(0);
-    setLooping(false);
+    lastPlaybackTickRef.current = 0;
+    lastPlaybackTimeRef.current = 0;
     setMetronome(false);
-    setBpm(120);
+    setSpeed(1);
     setMeasure(0);
+    measureRef.current = 0;
     setMeasureCount(0);
     setStatus('Carregando tablatura…');
 
@@ -116,8 +174,7 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
           enableAnimatedBeatCursor: true,
           enableElementHighlighting: true,
           scrollElement: '#tab-scroll-viewport',
-          scrollMode: alphaTab.ScrollMode.Smooth,
-          scrollSpeed: 500,
+          scrollMode: alphaTab.ScrollMode.Off,
         },
         display: {
           staveProfile: alphaTab.StaveProfile.ScoreTab,
@@ -150,13 +207,14 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
       }));
       unsubscribe.push(api.scoreLoaded.on(score => {
         if (!active) return;
-        baseTempoRef.current = Math.max(1, score.tempo || 120);
-        setBpm(Math.round(baseTempoRef.current));
         const staff = score.tracks[0]?.staves[0];
         if (staff) {
           staff.showStandardNotation = true;
           staff.showTablature = true;
-          const barWidth = Math.max(280, (containerRef.current?.clientWidth ?? 640) - 32);
+          // In horizontal layout alphaTab honors each bar's absolute display width.
+          // Make every bar exactly one visible tablature viewport wide.
+          const viewportWidth = containerRef.current?.parentElement?.clientWidth ?? 640;
+          const barWidth = Math.max(1, viewportWidth - 16);
           for (const bar of staff.bars) bar.displayWidth = barWidth;
           setMeasureCount(staff.bars.length);
         }
@@ -164,10 +222,19 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
       }));
       unsubscribe.push(api.playerPositionChanged.on(position => {
         if (!active) return;
+        const jumpedBackward = position.currentTick < lastPlaybackTickRef.current
+          || position.currentTime + 50 < lastPlaybackTimeRef.current;
+        lastPlaybackTickRef.current = position.currentTick;
+        lastPlaybackTimeRef.current = position.currentTime;
         setCurrentTime(position.currentTime);
         setEndTime(position.endTime);
         setCurrentTick(position.currentTick);
         setEndTick(position.endTick);
+        // alphaTab updates the beat cursor in the same playback cycle; wait for its
+        // DOM position so backward seeks and loop wraps immediately reposition it.
+        if (measureRef.current === 0) {
+          window.requestAnimationFrame(() => keepPlaybackCursorInView(jumpedBackward));
+        }
       }));
       unsubscribe.push(api.playerStateChanged.on(event => {
         if (active) setPlaying(event.state === alphaTab.synth.PlayerState.Playing);
@@ -175,7 +242,7 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
       unsubscribe.push(api.renderFinished.on(() => {
         if (!active) return;
         setRendered(true);
-        setStatus('Partitura renderizada; preparando áudio…');
+        setStatus('');
       }));
       unsubscribe.push(api.error.on(error => {
         if (active) setStatus(error.message || 'O alphaTab encontrou um erro.');
@@ -205,13 +272,7 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
     const boundedTick = Math.max(0, Math.min(endTick, tick));
     setCurrentTick(boundedTick);
     apiRef.current.tickPosition = boundedTick;
-  }
-
-  function toggleLoop() {
-    if (!apiRef.current) return;
-    const next = !looping;
-    apiRef.current.isLooping = next;
-    setLooping(next);
+    if (measureRef.current === 0) keepPlaybackCursorInView(true);
   }
 
   function toggleMetronome() {
@@ -221,12 +282,26 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
     setMetronome(next);
   }
 
-  function changeBpm(nextBpm: number) {
-    const bounded = Math.max(40, Math.min(240, nextBpm));
-    setBpm(bounded);
-    if (apiRef.current) {
-      apiRef.current.playbackSpeed = bounded / baseTempoRef.current;
-    }
+  function changeSpeed(nextSpeed: number) {
+    const bounded = Math.max(0.5, Math.min(2, nextSpeed));
+    setSpeed(bounded);
+    if (apiRef.current) apiRef.current.playbackSpeed = bounded;
+    if (instrumentalAudioRef.current) instrumentalAudioRef.current.playbackRate = bounded;
+  }
+
+  function seekInstrumental(time: number) {
+    const audio = instrumentalAudioRef.current;
+    if (!audio) return;
+    audio.currentTime = time;
+    setGuitarCurrentTime(time);
+  }
+
+  function toggleInstrumentalPlayback() {
+    const audio = instrumentalAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      void audio.play().catch(() => setStatus('Não foi possível reproduzir o áudio da guitarra.'));
+    } else audio.pause();
   }
 
   function changeMeasure(nextMeasure: number) {
@@ -234,42 +309,131 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
     if (!api) return;
     const bounded = Math.max(0, Math.min(measureCount, nextMeasure));
     setMeasure(bounded);
-    api.tickPosition = 0;
+    measureRef.current = bounded;
     if (bounded === 0) {
       api.playbackRange = null;
+      api.isLooping = false;
+      window.requestAnimationFrame(() => keepPlaybackCursorInView(true));
       return;
     }
 
     const bar = api.score?.tracks[0]?.staves[0]?.bars[bounded - 1];
-    const beats = bar?.voices.flatMap(voice => voice.beats)
-      .sort((left, right) => left.playbackStart - right.playbackStart) ?? [];
-    const firstBeat = beats[0];
-    const lastBeat = beats[beats.length - 1];
-    if (!firstBeat || !lastBeat) {
+    // PlaybackRange uses absolute song ticks, so use the master bar's own start
+    // and duration instead of the beats' bar-relative playbackStart values.
+    const firstTick = bar?.masterBar.start ?? Number.POSITIVE_INFINITY;
+    const endTick = bar ? firstTick + bar.masterBar.calculateDuration() : 0;
+    if (!Number.isFinite(firstTick) || endTick <= firstTick) {
       api.playbackRange = null;
+      api.isLooping = false;
       return;
     }
     api.playbackRange = {
-      startTick: firstBeat.playbackStart,
-      endTick: lastBeat.playbackStart + lastBeat.playbackDuration,
+      startTick: firstTick,
+      endTick,
     };
-    api.tickPosition = firstBeat.playbackStart;
+    api.isLooping = true;
+    // Wait for alphaTab to move its cursor, then pin the selected bar at the left
+    // edge of the viewport. The bar width is one viewport, so it stays in the box
+    // while the beat cursor traverses the loop.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if (measureRef.current !== bounded) return;
+      const viewport = containerRef.current?.parentElement;
+      if (!viewport || !containerRef.current) return;
+      const barBounds = api.boundsLookup?.findMasterBarByIndex(bounded - 1);
+      if (!barBounds) return;
+      const containerLeft = containerRef.current.getBoundingClientRect().left - viewport.getBoundingClientRect().left + viewport.scrollLeft;
+      const barLeft = containerLeft + barBounds.lineAlignedBounds.x;
+      const viewportInset = 8;
+      viewport.scrollLeft = Math.max(0, Math.min(barLeft - viewportInset, viewport.scrollWidth - viewport.clientWidth));
+    }));
   }
 
-  return <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 sm:p-8">
-    <p className="text-sm font-semibold uppercase tracking-[.2em] text-cyan-300">Resultado final · Etapa 3</p>
-    <h2 className="mt-2 text-xl font-semibold">Tablatura interativa</h2>
+  function beginScoreDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    scoreDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: event.currentTarget.scrollLeft,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveScoreDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = scoreDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientX - drag.startX;
+    if (Math.abs(delta) > 4) drag.moved = true;
+    if (drag.moved) {
+      event.currentTarget.scrollLeft = drag.startScrollLeft - delta;
+      event.preventDefault();
+    }
+  }
+
+  function endScoreDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = scoreDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    suppressScoreClickRef.current = drag.moved;
+    scoreDragRef.current = null;
+    if (!drag.moved && measureRef.current === 0) keepPlaybackCursorInView(true);
+    window.setTimeout(() => { suppressScoreClickRef.current = false; }, 0);
+  }
+
+  const playbackProgress = endTick > 0 ? Math.min(1, currentTick / endTick) : 0;
+
+  return <section className="rounded-2xl border border-slate-700 bg-slate-900 p-4 text-slate-100 sm:p-5">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="text-xl font-semibold">Tablatura interativa</h2>
+      <div role="group" aria-label="Fonte de áudio" className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
+        <button type="button" aria-pressed={audioSource === 'guitar'} onClick={() => selectAudioSource('guitar')}
+          className={`rounded-md px-3 py-2 text-xs font-semibold transition ${audioSource === 'guitar' ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:text-white'}`}>Guitarra isolada</button>
+        <button type="button" aria-pressed={audioSource === 'synth'} onClick={() => selectAudioSource('synth')}
+          className={`rounded-md px-3 py-2 text-xs font-semibold transition ${audioSource === 'synth' ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:text-white'}`}>Sintetizador</button>
+      </div>
+    </div>
     <p role="status" className="mt-2 text-xs text-slate-400">{status}</p>
 
-    <div id="tab-scroll-viewport" className="mt-5 min-h-[400px] w-full overflow-x-hidden rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100">
-      <div ref={containerRef} className="block min-h-[400px] w-full" style={{ minHeight: 400 }} />
+    <div id="tab-scroll-viewport" onPointerDown={beginScoreDrag} onPointerMove={moveScoreDrag} onPointerUp={endScoreDrag}
+      onPointerCancel={endScoreDrag} onClickCapture={event => {
+        if (suppressScoreClickRef.current) { event.preventDefault(); event.stopPropagation(); suppressScoreClickRef.current = false; }
+      }}
+      className="tab-scroll-viewport mt-4 min-h-[300px] w-full touch-pan-x select-none overflow-x-auto overflow-y-hidden rounded-xl border border-slate-700 bg-slate-950 p-2 text-slate-100 cursor-grab active:cursor-grabbing">
+      <div ref={containerRef} className="block min-h-[300px] w-full" style={{ minHeight: 300 }} />
       {!alphaTex && !fileUrl && !fileData && tab &&
         <pre className="overflow-x-auto whitespace-pre font-mono text-sm leading-7 text-slate-100">{tab}</pre>}
     </div>
 
-    <footer className="sticky bottom-3 z-20 mt-6 rounded-xl border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur sm:p-4">
+    {audioSource === 'guitar' ? <footer className="mt-6 rounded-xl border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur sm:p-4">
+      <audio ref={instrumentalAudioRef} aria-label="Áudio da guitarra isolada" className="sr-only" preload="metadata" src={instrumentalUrl}
+        onLoadedMetadata={event => {
+          const audio = event.currentTarget;
+          setGuitarDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+          setGuitarCurrentTime(audio.currentTime);
+          audio.volume = volume / 100;
+          audio.playbackRate = speed;
+          audio.loop = false;
+        }}
+        onTimeUpdate={event => {
+          const audio = event.currentTarget;
+          setGuitarCurrentTime(audio.currentTime);
+        }}
+        onPlay={() => setGuitarPlaying(true)} onPause={() => setGuitarPlaying(false)} onEnded={() => setGuitarPlaying(false)}
+        onError={() => setStatus('Não foi possível carregar o áudio da guitarra.')}>Seu navegador não oferece suporte à reprodução de áudio.</audio>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <button type="button" aria-label={playing ? 'Pausar' : 'Reproduzir'} onClick={() => apiRef.current?.playPause()} disabled={!ready}
+        <button type="button" aria-label={guitarPlaying ? 'Pausar' : 'Reproduzir'} onClick={toggleInstrumentalPlayback} disabled={!guitarDuration}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-lg font-bold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-40">{guitarPlaying ? 'Ⅱ' : '▶'}</button>
+        <span className="w-24 shrink-0 text-center font-mono text-xs tabular-nums text-slate-300">{formatTime(guitarCurrentTime * 1000)} / {formatTime(guitarDuration * 1000)}</span>
+        <div className="relative flex h-8 min-w-40 flex-1 touch-none items-center justify-between gap-[2px]" aria-label="Linha do tempo da guitarra isolada">
+          {WAVEFORM_BARS.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${guitarDuration > 0 && index / WAVEFORM_BARS.length <= guitarCurrentTime / guitarDuration ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
+          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[1] h-7 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow" style={{ left: `${guitarDuration > 0 ? (guitarCurrentTime / guitarDuration) * 100 : 0}%` }} />
+          <input aria-label="Posição da guitarra isolada" type="range" min={0} max={Math.max(1, guitarDuration)} step={0.01}
+            value={Math.min(guitarCurrentTime, Math.max(1, guitarDuration))} onChange={event => seekInstrumental(Number(event.target.value))}
+            disabled={!guitarDuration} className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
+        </div>
+      </div>
+    </footer> : <footer className="mt-6 rounded-xl border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur sm:p-4">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <button type="button" aria-label={playing ? 'Pausar' : 'Reproduzir'} onClick={togglePlayback} disabled={!ready}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-lg font-bold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-40">
           {playing ? 'Ⅱ' : '▶'}
         </button>
@@ -278,21 +442,26 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
           {formatTime(currentTime)} / {formatTime(endTime)}
         </span>
 
-        <input aria-label="Posição da música" type="range" min={0} max={Math.max(1, endTick)} step={1}
-          value={Math.min(currentTick, Math.max(1, endTick))} onChange={event => seekToTick(Number(event.target.value))}
-          disabled={!ready || endTick === 0} className="min-w-40 flex-1 accent-cyan-300 disabled:opacity-40" />
+        <div className="relative flex h-8 min-w-40 flex-1 touch-none items-center justify-between gap-[2px]" aria-label="Linha do tempo da tablatura">
+          {WAVEFORM_BARS.map((height, index) => <span key={index} aria-hidden="true" className={`min-w-0 flex-1 rounded-full ${index / WAVEFORM_BARS.length <= playbackProgress ? 'bg-cyan-300' : 'bg-slate-700'}`} style={{ height: `${height}%` }} />)}
+          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[1] h-7 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow" style={{ left: `${playbackProgress * 100}%` }} />
+          <input aria-label="Posição da música" type="range" min={0} max={Math.max(1, endTick)} step={1}
+            value={Math.min(currentTick, Math.max(1, endTick))} onChange={event => seekToTick(Number(event.target.value))}
+            disabled={!ready || endTick === 0} className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
+        </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <button type="button" aria-pressed={looping} onClick={toggleLoop} disabled={!ready}
-            className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${looping ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}`}>Loop</button>
           <button type="button" aria-pressed={metronome} onClick={toggleMetronome} disabled={!ready}
             className={`rounded-lg px-2.5 py-2 text-xs font-semibold ${metronome ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}`}>Metrônomo</button>
 
           <label className="flex items-center gap-2 text-xs text-slate-300">
-            BPM
-            <input aria-label="BPM da reprodução" type="number" min={40} max={240} step={1} value={bpm}
-              onChange={event => changeBpm(Number(event.target.value) || 40)} disabled={!ready}
-              className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-center text-slate-100" />
+            Velocidade
+            <select aria-label="Velocidade da reprodução" value={speed}
+              onChange={event => changeSpeed(Number(event.target.value))} disabled={!ready}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100">
+              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(value =>
+                <option key={value} value={value}>{value}×</option>)}
+            </select>
           </label>
 
           <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -318,6 +487,6 @@ export function TabViewer({ alphaTex, fileUrl, fileData, tab }: TabViewerProps) 
           </label>
         </div>
       </div>
-    </footer>
+    </footer>}
   </section>;
 }

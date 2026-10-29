@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from time import time
 
-from core.config import SEPARATION_DIR
+from core.config import BASIC_PITCH_MIDI_TEMPO, SEPARATION_DIR
 from core.state import jobs, jobs_lock
 from pipeline.steps.separator import create_preview, prepare_source, remove_preview, separate_guitar
 from pipeline.steps.tab_builder import make_alphatex, make_tab
@@ -17,7 +17,7 @@ LOG = logging.getLogger("tab-ia-api")
 
 
 def process_job(job_id: str, source_path: str, start_seconds: float = 0.0,
-                end_seconds: float | None = None) -> None:
+                end_seconds: float | None = None, basic_pitch_settings: dict | None = None) -> None:
     source = Path(source_path)
     preview: Path | None = None
     with jobs_lock:
@@ -34,9 +34,10 @@ def process_job(job_id: str, source_path: str, start_seconds: float = 0.0,
             selected_source = prepare_source(source, work_dir, start_seconds, end_seconds)
             guitar = separate_guitar(selected_source, work_dir)
             LOG.info("Job %s: enviando a stem %s para Basic Pitch", job_id, guitar)
-            notes, duration = transcribe(guitar)
+            notes, duration = transcribe(guitar, basic_pitch_settings)
             tab = make_tab(notes, duration)
-            alpha_tex = make_alphatex(notes, duration)
+            basic_pitch_tempo = (basic_pitch_settings or {}).get("midi_tempo", BASIC_PITCH_MIDI_TEMPO)
+            alpha_tex = make_alphatex(notes, duration, basic_pitch_tempo)
             preview = create_preview(guitar, job_id)
             with jobs_lock:
                 if job_id in jobs:
