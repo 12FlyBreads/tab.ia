@@ -13,6 +13,7 @@ import yt_dlp
 from core.config import MAX_UPLOAD_BYTES
 from core.state import jobs, jobs_lock
 from pipeline.orchestrator import process_job
+from pipeline.steps.transcriber import DanmonSettings
 from utils.file_manager import cleanup_upload, upload_path
 
 LOG = logging.getLogger("tab-ia-api")
@@ -115,7 +116,7 @@ def cleanup_expired_youtube_previews() -> None:
 
 
 def process_youtube_job(job_id: str, source: str, start_seconds: float,
-                        end_seconds: float | None, settings: dict) -> None:
+                        end_seconds: float | None, danmon_settings: DanmonSettings | None = None) -> None:
     """Download a bounded YouTube audio file, then use the existing pipeline."""
     parsed = urlparse(source)
     if parsed.scheme or parsed.netloc:
@@ -157,7 +158,7 @@ def process_youtube_job(job_id: str, source: str, start_seconds: float,
         with jobs_lock:
             if job_id in jobs:
                 jobs[job_id]["source_path"] = str(downloaded)
-        process_job(job_id, str(downloaded), start_seconds, end_seconds, settings)
+        process_job(job_id, str(downloaded), start_seconds, end_seconds, danmon_settings)
     except Exception as exc:
         cleanup_upload(destination)
         LOG.exception("Falha ao obter áudio do YouTube para o job %s", job_id)

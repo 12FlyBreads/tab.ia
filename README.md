@@ -9,19 +9,19 @@ Browser -> Next.js POST /api/jobs -> FastAPI POST /jobs
 Browser -> Next.js GET /api/jobs/:id <- FastAPI GET /jobs/:id
                                           |
                                   BackgroundTasks
-                              Demucs -> Basic Pitch -> tab
+                                  Demucs -> danmor/guitab -> AlphaTex
                                           |
                                   jobs (dicionário RAM)
 ```
 
-O pipeline usa o modelo experimental `htdemucs_6s` e a stem `guitar` para tentar isolar guitarra/violão antes da inferência. Essa stem pode conter vazamento de outros sons e o resultado depende do arranjo e da qualidade do áudio. A conversão MIDI usa afinação padrão E A D G B e, para cada nota, seleciona a primeira corda/casa válida até a casa 22; não otimiza digitação nem ritmo. Basic Pitch pode ser sensível a áudio polifônico.
+O pipeline usa o modelo experimental `htdemucs_6s` e a stem `guitar` para tentar isolar guitarra/violão. O worker usa a biblioteca oficial Guitab para obter diretamente os eventos de onset, corda e casa do checkpoint E25 hospedado em `danmor/guitab`; depois quantiza em semicolcheias e monta AlphaTex. A stem pode conter vazamento de outros sons e a qualidade depende do modelo e do arranjo. Os pesos do Guitab estão sob licença CC BY-NC-SA 4.0 (uso não comercial).
 
-O worker mantém a stem WAV para a inferência e cria uma prévia MP3 temporária para o player. A rota da prévia suporta requisições HTTP por intervalo (`Range`) para carregamento progressivo e busca no áudio.
+O worker mantém `/temp/<job_id>_guitar.wav` e `/temp/<job_id>.tex`, além de criar uma prévia MP3 para o player. A rota da prévia suporta requisições HTTP por intervalo (`Range`) para carregamento progressivo e busca no áudio. O resultado de status contém o AlphaTex em `alpha_tex` e `tab`.
 
 ## Pré-requisitos
 
 - Node.js 20 ou superior e npm.
-- Python 3.10 recomendado para compatibilidade das dependências de áudio. Use essa versão para criar o ambiente virtual; Python 3.14 não é compatível com o TensorFlow exigido pelo Basic Pitch.
+- Python 3.11 ou superior (exigido pela biblioteca oficial Guitab).
 - FFmpeg instalado e disponível no `PATH` (necessário para decodificação e Demucs).
 
 No Windows, você pode instalar o FFmpeg pelo WinGet: `winget install --id Gyan.FFmpeg.Shared --exact`. Depois, abra um terminal novo e confirme com `ffmpeg -version`.
@@ -40,21 +40,23 @@ No Windows, você pode instalar o FFmpeg pelo WinGet: `winget install --id Gyan.
 
    ```powershell
    Set-Location .\worker
-   py -3.10 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
+   py -3.11 -m venv .venv-guitab
+   .\.venv-guitab\Scripts\Activate.ps1
    python --version
    python -m pip install --upgrade pip
    python -m pip install -r requirements.txt
    python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
    ```
 
-   Confirme que `python --version` mostra `Python 3.10.x`. Esses comandos criam o ambiente em `worker/.venv`; execute `Set-Location .\worker` apenas uma vez, partindo da raiz do projeto. No macOS/Linux, use `python3.10 -m venv .venv` e `source .venv/bin/activate` no lugar dos comandos de criação e ativação do PowerShell.
+   Confirme que `python --version` mostra `Python 3.11` ou superior. Esses comandos criam o ambiente em `worker/.venv-guitab`; execute `Set-Location .\worker` apenas uma vez, partindo da raiz do projeto. No macOS/Linux, use `python3.11 -m venv .venv-guitab` e `source .venv-guitab/bin/activate` no lugar dos comandos de criação e ativação do PowerShell.
 
 4. Abra http://localhost:3000 e envie um MP3/WAV de até 50 MB. Mantenha Next.js e FastAPI ativos enquanto o job é processado.
 
 Antes de gerar a tablatura, o player permite ouvir o upload completo. Arraste os dois marcadores da linha de seleção para delimitar um trecho e use “Ouvir trecho selecionado” para conferi-lo; ao enviar, somente esse intervalo será recortado e passado ao Demucs.
 
-A primeira execução pode baixar modelos do Demucs/Basic Pitch e levar alguns minutos. Para este MVP, rode apenas um processo Uvicorn: cada processo teria seu próprio dicionário de jobs, e requisições distribuídas entre processos não encontrariam necessariamente o job correspondente. Reiniciar a API apaga os jobs da memória e limpa a pasta `temp/`; ao iniciar, ela remove possíveis sobras de uma execução anterior. Uploads e saídas intermediárias do Demucs são apagados ao terminar cada job. A prévia MP3 fica em `temp/previews/` até o descarte/reload da página e também é apagada após uma hora como proteção adicional.
+Depois de iniciar a interface, o botão de menu abre as configurações de extração de notas do DanmoN/Guitab. Os ajustes são salvos no navegador e aplicados ao próximo processamento; “Restaurar padrões” recupera os valores de decodificação do checkpoint E25.
+
+A primeira execução baixa os modelos do Demucs e o checkpoint E25 do Hugging Face. A biblioteca Guitab do autor é instalada pelo GitHub no `requirements.txt`; não é um modelo `transformers`, por isso não usa `AutoModelForAudioClassification`. Para este MVP, rode apenas um processo Uvicorn: cada processo teria seu próprio dicionário de jobs. Reiniciar a API apaga os jobs da memória e limpa a pasta `temp/`; ao iniciar, ela remove possíveis sobras de uma execução anterior. Uploads e saídas intermediárias do Demucs são apagados ao terminar cada job; artefatos e prévia permanecem até o descarte/reload ou expiração do job.
 
 ## Estrutura
 
@@ -66,7 +68,7 @@ worker/api/                  aplicação FastAPI e rotas HTTP de jobs
 worker/core/                 configuração e estado em memória dos jobs
 worker/utils/                diretórios temporários e wrappers FFmpeg
 worker/pipeline/orchestrator.py coordenação das etapas e atualização dos jobs
-worker/pipeline/steps/       recorte, separação Demucs, prévia instrumental, transcrição Basic Pitch e tablatura
+worker/pipeline/steps/         recorte, separação Demucs, transcrição corda/casa e geração AlphaTex
 app/hooks/                   estado de jobs, polling e prévia local de áudio
 app/components/              upload, player instrumental e visualizador de tablatura
 worker/requirements.txt      dependências Python

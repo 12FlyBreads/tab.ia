@@ -38,6 +38,17 @@ def cleanup_preview(path: str | Path | None) -> None:
     _remove_file_and_empty_parent(path, PREVIEWS_DIR)
 
 
+def cleanup_job_artifacts(job: dict) -> None:
+    for key in ("guitar_path", "tex_path"):
+        path = job.get(key)
+        if path:
+            try:
+                Path(path).resolve().relative_to(TEMP_ROOT.resolve())
+            except ValueError:
+                continue
+            Path(path).unlink(missing_ok=True)
+
+
 def _remove_file_and_empty_parent(path: str | Path | None, allowed_root: Path) -> None:
     if not path:
         return

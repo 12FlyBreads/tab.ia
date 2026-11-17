@@ -3,9 +3,9 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9
 demucs>=4.0.1,<5
-basic-pitch>=0.4.0,<1
-pretty_midi>=0.2.10,<1
-numpy>=1.23,<2
+guitab @ git+https://github.com/DanieleMorotti/guitab.git@main
+torch>=2.2
+numpy>=1.23,<3
 soundfile>=0.12,<1
 librosa>=0.10,<1
 yt-dlp>=2024.10.22
