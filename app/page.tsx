@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { AudioUploader } from './components/AudioUploader';
-import { useAudioJob } from './hooks/useAudioJob';
 import { SettingsPanel } from './components/SettingsPanel';
-import { DEFAULT_BASIC_PITCH_SETTINGS, type BasicPitchSettings } from './utils/basicPitchSettings';
+import { useAudioJob } from './hooks/useAudioJob';
+import { DEFAULT_DANMON_SETTINGS, isDanmonSettings, type DanmonSettings } from './utils/danmonSettings';
 
 const TabViewer = dynamic(() => import('./components/TabViewer').then(module => module.TabViewer), {
   ssr: false,
@@ -15,7 +15,7 @@ const TabViewer = dynamic(() => import('./components/TabViewer').then(module => 
 
 export default function Home() {
   const { job, busy, message, submit } = useAudioJob();
-  const [settings, setSettings] = useState<BasicPitchSettings>(DEFAULT_BASIC_PITCH_SETTINGS);
+  const [settings, setSettings] = useState<DanmonSettings>(DEFAULT_DANMON_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stage, setStage] = useState(0);
@@ -26,14 +26,27 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('tab-ia-basic-pitch-settings');
-      if (stored) setSettings({ ...DEFAULT_BASIC_PITCH_SETTINGS, ...JSON.parse(stored) });
-    } catch { /* Ignore invalid or unavailable local preferences. */ }
+      const stored = window.localStorage.getItem('tab-ia-danmon-settings');
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored);
+        if (isDanmonSettings(parsed)) setSettings(parsed);
+        else console.warn('As configurações salvas do DanmoN são inválidas; usando os padrões.');
+      }
+    } catch (error) {
+      console.error('Não foi possível carregar as configurações salvas do DanmoN:', error);
+    }
     setSettingsReady(true);
   }, []);
+
   useEffect(() => {
-    if (settingsReady) window.localStorage.setItem('tab-ia-basic-pitch-settings', JSON.stringify(settings));
+    if (!settingsReady) return;
+    try {
+      window.localStorage.setItem('tab-ia-danmon-settings', JSON.stringify(settings));
+    } catch (error) {
+      console.error('Não foi possível salvar as configurações do DanmoN:', error);
+    }
   }, [settings, settingsReady]);
+
   useEffect(() => {
     if (job?.status === 'completed' && job.tab && stage === 1) setStage(2);
   }, [job?.status, job?.tab, stage]);
@@ -57,12 +70,12 @@ export default function Home() {
   return <main className={`flex min-h-screen flex-col px-5 ${started ? 'justify-start pt-16 pb-4 sm:pb-6' : 'py-10 sm:py-16'}`}>
     {started && <>
       <div className="absolute left-1/2 top-6 z-40 w-full max-w-3xl -translate-x-1/2 px-5"><p className="text-left text-xs font-semibold uppercase tracking-[.2em] text-cyan-300">TAB.IA · ÁUDIO PARA TABLATURA</p></div>
-      <button type="button" aria-label="Abrir configurações" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)} className="fixed right-5 top-5 z-40 rounded-xl border border-slate-700 bg-slate-900/90 p-3 text-cyan-200 shadow-lg transition hover:border-cyan-300 hover:bg-slate-800">
+      <button type="button" aria-label="Abrir configurações do DanmoN" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)} className="fixed right-5 top-5 z-40 rounded-xl border border-slate-700 bg-slate-900/90 p-3 text-cyan-200 shadow-lg transition hover:border-cyan-300 hover:bg-slate-800">
         <span className="flex w-6 flex-col gap-1.5" aria-hidden="true"><span className="h-0.5 w-full rounded bg-current" /><span className="h-0.5 w-full rounded bg-current" /><span className="h-0.5 w-full rounded bg-current" /></span>
       </button>
+      <SettingsPanel open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} onReset={() => setSettings(DEFAULT_DANMON_SETTINGS)} />
       <button type="button" aria-label="Etapa anterior" onClick={() => moveStage(stage - 1)} disabled={stage === 0} className="stage-arrow-left fixed z-30 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-900 p-2 text-cyan-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-30 sm:p-3">←</button>
       <button type="button" aria-label="Próxima etapa" onClick={() => moveStage(stage + 1)} disabled={stage >= maxStage} className="stage-arrow-right fixed z-30 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-900 p-2 text-cyan-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-30 sm:p-3">→</button>
-      <SettingsPanel open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} onReset={() => setSettings(DEFAULT_BASIC_PITCH_SETTINGS)} />
     </>}
     <section className={`mx-auto w-full max-w-3xl ${started ? '' : 'my-auto'}`}>
       {!started ? <div className="mx-auto max-w-2xl text-left">

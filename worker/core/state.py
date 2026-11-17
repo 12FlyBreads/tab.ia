@@ -5,7 +5,7 @@ import threading
 from time import time
 
 from core.config import JOB_TTL_SECONDS
-from utils.file_manager import cleanup_preview, cleanup_upload
+from utils.file_manager import cleanup_job_artifacts, cleanup_preview, cleanup_upload
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
@@ -20,4 +20,5 @@ def remove_expired_jobs() -> None:
         for job_id in expired:
             cleanup_preview(jobs[job_id].get("instrumental_path"))
             cleanup_upload(jobs[job_id].get("source_path"))
+            cleanup_job_artifacts(jobs[job_id])
             del jobs[job_id]

@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import type { BasicPitchSettings } from '../utils/basicPitchSettings';
+import type { DanmonSettings } from '../utils/danmonSettings';
 
 export type Job = { id: string; status: 'queued' | 'processing' | 'completed' | 'failed'; tab?: string; alpha_tex?: string; error?: string };
 
@@ -34,7 +34,7 @@ export function useAudioJob() {
   }, [job]);
 
   const submit = useCallback(async (event: FormEvent<HTMLFormElement>, file: File | null, youtubePreviewId: string,
-    duration: number, trimStart: number, trimEnd: number, settings: BasicPitchSettings) => {
+    duration: number, trimStart: number, trimEnd: number, danmonSettings: DanmonSettings) => {
     event.preventDefault();
     if (!file && !youtubePreviewId) return false;
     discardStoredJob();
@@ -43,7 +43,7 @@ export function useAudioJob() {
       const body = new FormData();
       if (file) body.append('file', file);
       if (youtubePreviewId) body.append('youtube_preview_id', youtubePreviewId);
-      body.append('basic_pitch_settings', JSON.stringify(settings));
+      body.append('danmon_settings', JSON.stringify(danmonSettings));
       const wholeTrackSelected = duration > 0 && trimStart <= 0.05 && trimEnd >= duration - 0.05;
       if (duration > 0 && !wholeTrackSelected) {
         body.append('start_seconds', trimStart.toFixed(2));

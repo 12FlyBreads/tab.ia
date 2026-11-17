@@ -25,6 +25,7 @@ uploads/
 *.pth
 
 # Python environments, bytecode and test/tool caches
+.venv-*
 .venv/
 venv/
 env/
